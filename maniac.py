@@ -15,6 +15,8 @@ def run_bot():
     yt_dl_options = {"format": "bestaudio/best"}
     ytdl = yt_dlp.YoutubeDL(yt_dl_options)
 
+    song_queue = {}
+
     ffmpeg_options = {'options': '-vn'}
 
     @client.event
@@ -23,9 +25,12 @@ def run_bot():
 
     @client.event
     async def on_message(message):
-        if message.content.startswith("!!"):
+        if message.content.startswith("!!play"):
             try:
-                voice_client =await message.author.voice.channel.connect()
+                if(message.author.voice == None):
+                    await message.channel.send("Et oo viä kanaval!")
+                    return
+                voice_client = await message.author.voice.channel.connect()
                 voice_clients[voice_client.guild.id] = voice_client
             except Exception as e:
                 print(e)
@@ -33,15 +38,18 @@ def run_bot():
             try:
                 url = message.content.split()[1]
 
-                loop = asyncio.get_event_loop()
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+                guild_id = message.guild.id
 
-                song = data['url']
-                player = discord.FFmpegPCMAudio(song, **ffmpeg_options)
+                if guild_id not in song_queue:
+                    song_queue[guild_id] = []
 
-                voice_clients[message.guild.id].play(player)
+                song_queue[guild_id].append(url)
+
+                if not voice_client.is_playing():
+                    await play_next_song(voice_client, guild_id)
             except Exception as e:
                 print(e)
+
 
         if message.content.startswith("!!pause"):
             try:
@@ -61,6 +69,31 @@ def run_bot():
                 await voice_clients[message.guild.id].disconnect()
             except Exception as e:
                 print(e)
-            
+
+        if message.content.startswith("!!help"):
+            try:
+                await message.channel.send("Commands: \n!!play <url> \n!!pause \n!!resume \n!!stop \n!!skip")
+            except Exception as e:
+                print(e)
+        
+        if message.content.startswith("!!skip"):
+            try:
+                voice_clients[message.guild.id].stop()
+            except Exception as e:
+                print(e)
+         
+    async def play_next_song(voice_client, guild_id):
+        if song_queue[guild_id]:
+            url = song_queue[guild_id].pop(0)
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+            song = data['url']
+            source = discord.FFmpegPCMAudio(song, **ffmpeg_options)
+            voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(voice_client, guild_id), loop))
+        else:
+            await voice_client.disconnect()
+            print("soimassa")
+
+
     client.run(TOKEN)
 
